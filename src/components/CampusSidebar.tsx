@@ -1,16 +1,17 @@
-import { LayoutDashboard, UserCheck, DoorOpen, BarChart3, Settings } from "lucide-react";
-import { useState } from "react";
+import { LayoutDashboard, UserCheck, DoorOpen, BarChart3, Settings, LogOut } from "lucide-react";
+import { useNavigate, useLocation } from "react-router-dom";
 
 const navItems = [
-  { title: "Dashboard", icon: LayoutDashboard, active: true },
-  { title: "Attendance", icon: UserCheck },
-  { title: "Rooms", icon: DoorOpen },
-  { title: "Analytics", icon: BarChart3 },
-  { title: "Settings", icon: Settings },
+  { title: "Dashboard", icon: LayoutDashboard, path: "/" },
+  { title: "Attendance", icon: UserCheck, path: "/attendance" },
+  { title: "Rooms", icon: DoorOpen, path: "/rooms" },
+  { title: "Analytics", icon: BarChart3, path: "/analytics" },
+  { title: "Settings", icon: Settings, path: "/settings" },
 ];
 
 const CampusSidebar = () => {
-  const [viewAs, setViewAs] = useState<"Faculty" | "Student">("Faculty");
+  const navigate = useNavigate();
+  const location = useLocation();
 
   return (
     <aside className="w-52 min-h-screen bg-sidebar flex flex-col border-r border-sidebar-border">
@@ -29,48 +30,59 @@ const CampusSidebar = () => {
       <div className="px-4 mt-2">
         <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">View as</p>
         <div className="flex bg-secondary rounded-lg p-0.5">
-          {(["Faculty", "Student"] as const).map((role) => (
-            <button
-              key={role}
-              onClick={() => setViewAs(role)}
-              className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${
-                viewAs === role
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {role}
-            </button>
-          ))}
+          <button
+            className="flex-1 text-xs py-1.5 rounded-md bg-primary text-primary-foreground transition-colors"
+          >
+            Faculty
+          </button>
+          <button
+            onClick={() => navigate("/student")}
+            className="flex-1 text-xs py-1.5 rounded-md text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Student
+          </button>
         </div>
       </div>
 
       {/* Navigation */}
       <nav className="mt-6 flex-1 px-2">
-        {navItems.map((item) => (
-          <button
-            key={item.title}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm mb-0.5 transition-colors ${
-              item.active
-                ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                : "text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"
-            }`}
-          >
-            <item.icon className="h-4 w-4" />
-            <span>{item.title}</span>
-          </button>
-        ))}
+        {navItems.map((item) => {
+          const isActive = location.pathname === item.path;
+          return (
+            <button
+              key={item.title}
+              onClick={() => navigate(item.path)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm mb-0.5 transition-colors ${
+                isActive
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"
+              }`}
+            >
+              <item.icon className="h-4 w-4" />
+              <span>{item.title}</span>
+            </button>
+          );
+        })}
       </nav>
 
       {/* User */}
-      <div className="p-4 flex items-center gap-3 border-t border-sidebar-border">
-        <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center">
-          <span className="text-muted-foreground text-xs">PS</span>
+      <div className="p-4 border-t border-sidebar-border">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center">
+            <span className="text-muted-foreground text-xs">PS</span>
+          </div>
+          <div>
+            <p className="text-sm text-sidebar-accent-foreground">Dr. Priya Sharma</p>
+            <p className="text-xs text-muted-foreground">CS Department</p>
+          </div>
         </div>
-        <div>
-          <p className="text-sm text-sidebar-accent-foreground">Dr. Priya Sharma</p>
-          <p className="text-xs text-muted-foreground">CS Department</p>
-        </div>
+        <button
+          onClick={() => navigate("/login")}
+          className="w-full flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5"
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          Sign Out
+        </button>
       </div>
     </aside>
   );
