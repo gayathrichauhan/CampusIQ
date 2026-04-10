@@ -37,7 +37,7 @@ const LiveRoomStatus = () => {
           </button>
         </div>
       </div>
-      <p className="text-muted-foreground text-sm mb-5">Real-time IoT monitoring of campus classrooms</p>
+
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {rooms.map((room) => {
