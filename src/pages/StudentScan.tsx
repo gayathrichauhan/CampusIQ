@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Camera, CheckCircle, XCircle, MapPin, Shield, Loader2 } from "lucide-react";
+import { ArrowLeft, Camera, MapPin, XCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Html5Qrcode } from "html5-qrcode";
-import { haversineDistance } from "@/lib/distance";
 
-type ScanState = "idle" | "scanning" | "locating" | "success" | "proxy_alert" | "expired" | "error";
+// ─── Types ────────────────────────────────────────────────────────────────────
+type ScanState = "idle" | "scanning" | "processing" | "expired" | "error";
 
 interface QRPayload {
   sessionId: string;
@@ -14,43 +14,10 @@ interface QRPayload {
   expiresAt: number;
 }
 
-interface ScanResult {
-  distance: number;
-  confidence: number;
-  time: string;
-  sessionId: string;
-}
-
-const GEOFENCE_RADIUS = 30; // metres
-const STUDENT_NAME = "Rahul Kumar";
-
-function saveAttendance(record: {
-  name: string;
-  time: string;
-  status: "present" | "proxy";
-  sessionId: string;
-}) {
-  try {
-    const existing = JSON.parse(localStorage.getItem("attendance_records") || "[]");
-    existing.push(record);
-    localStorage.setItem("attendance_records", JSON.stringify(existing));
-  } catch {
-    // ignore
-  }
-}
-
-function calcConfidence(distance: number, accuracy: number): number {
-  let score = 100;
-  if (accuracy > 100) score -= 30;
-  if (distance > GEOFENCE_RADIUS) score -= 60;
-  else if (distance > 15) score -= 20;
-  return Math.max(0, score);
-}
-
+// ─── Component ────────────────────────────────────────────────────────────────
 const StudentScan = () => {
   const navigate = useNavigate();
   const [scanState, setScanState] = useState<ScanState>("idle");
-  const [result, setResult] = useState<ScanResult | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const scannerStarted = useRef(false);
@@ -68,69 +35,41 @@ const StudentScan = () => {
   };
 
   const handleQRSuccess = async (decodedText: string) => {
-    // Stop scanner immediately
     await stopScanner();
-    setScanState("locating");
+    setScanState("processing");
 
-    // Parse QR
+    // Parse QR payload
     let payload: QRPayload;
     try {
       payload = JSON.parse(decodedText);
-      if (!payload.sessionId || !payload.lat || !payload.lng || !payload.expiresAt) {
-        throw new Error("Invalid QR");
-      }
+      if (!payload.sessionId || !payload.expiresAt) throw new Error("Invalid QR");
     } catch {
-      setErrorMsg("Invalid QR code format. Please scan the correct QR.");
+      setErrorMsg("Invalid QR code. Please scan the correct code shown by your teacher.");
       setScanState("error");
       return;
     }
 
-    // Check expiry
+    // Check QR expiry
     if (Date.now() > payload.expiresAt) {
       setScanState("expired");
       return;
     }
 
-    // Get GPS
-    if (!navigator.geolocation) {
-      setErrorMsg("Geolocation is not supported by your browser.");
-      setScanState("error");
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const { latitude, longitude, accuracy } = pos.coords;
-          const distance = haversineDistance(latitude, longitude, payload.lat, payload.lng);
-          const confidence = calcConfidence(distance, accuracy);
-          const time = new Date().toLocaleTimeString();
-
-          const record = {
-            name: STUDENT_NAME,
-            time,
-            sessionId: payload.sessionId,
-            status: distance <= GEOFENCE_RADIUS ? ("present" as const) : ("proxy" as const),
-          };
-
-          saveAttendance(record);
-
-          setResult({ distance, confidence, time, sessionId: payload.sessionId });
-          setScanState(distance <= GEOFENCE_RADIUS ? "success" : "proxy_alert");
-        },
-        (err) => {
-          console.error("GPS error:", err);
-          setErrorMsg("Could not get your location. Please enable location access.");
-          setScanState("error");
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
+    // ── QR is valid → move to PIN verification step ──────────────────────────
+    // Pass sessionId and scan timestamp so StudentPinVerify can derive the
+    // correct PIN window and verify the student's input.
+    navigate("/student/pin", {
+      state: {
+        sessionId: payload.sessionId,
+        qrTimestamp: Date.now(),
+      },
+    });
   };
 
   const startScanner = async () => {
     setScanState("scanning");
     setErrorMsg("");
 
-    // Small delay to ensure DOM element is mounted
     await new Promise((r) => setTimeout(r, 200));
 
     try {
@@ -148,21 +87,17 @@ const StudentScan = () => {
           { facingMode: "environment" },
           { fps: 10, qrbox: { width: 220, height: 220 } },
           handleQRSuccess,
-          () => {} // ignore intermediate failures
+          () => {}
       );
       scannerStarted.current = true;
-    } catch (err: any) {
-      console.error("Scanner error:", err);
+    } catch {
       setErrorMsg("Camera access denied or unavailable. Please allow camera permission.");
       setScanState("error");
     }
   };
 
-  // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      stopScanner();
-    };
+    return () => { stopScanner(); };
   }, []);
 
   return (
@@ -172,21 +107,19 @@ const StudentScan = () => {
           <Button
               variant="ghost"
               size="icon"
-              onClick={async () => {
-                await stopScanner();
-                navigate("/student");
-              }}
+              onClick={async () => { await stopScanner(); navigate("/student"); }}
               className="text-muted-foreground"
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div>
             <h1 className="text-foreground font-semibold text-sm">Scan QR Code</h1>
-            <p className="text-muted-foreground text-xs">Point your camera at the QR code</p>
+            <p className="text-muted-foreground text-xs">Step 1 of 2 — Point camera at the QR</p>
           </div>
         </header>
 
         <main className="flex-1 flex flex-col items-center justify-center p-6">
+
           {/* IDLE */}
           {scanState === "idle" && (
               <div className="text-center">
@@ -194,8 +127,11 @@ const StudentScan = () => {
                   <Camera className="h-16 w-16 text-muted-foreground/40" />
                 </div>
                 <h2 className="text-foreground font-semibold text-lg mb-2">Ready to Scan</h2>
-                <p className="text-muted-foreground text-sm mb-6 max-w-xs">
-                  Ask your teacher to display the QR code, then tap below to scan
+                <p className="text-muted-foreground text-sm mb-1 max-w-xs">
+                  Ask your teacher to display the QR code, then tap below.
+                </p>
+                <p className="text-muted-foreground text-xs mb-6 max-w-xs">
+                  After scanning you'll enter a verbal PIN your teacher announces.
                 </p>
                 <Button
                     onClick={startScanner}
@@ -217,120 +153,26 @@ const StudentScan = () => {
                 />
                 <p className="text-muted-foreground text-sm">
                   <MapPin className="h-3 w-3 inline mr-1" />
-                  Point camera at the QR code displayed by your teacher
+                  Point camera at the QR on the board
                 </p>
                 <Button
                     variant="outline"
                     className="mt-4 border-border text-muted-foreground"
-                    onClick={async () => {
-                      await stopScanner();
-                      setScanState("idle");
-                    }}
+                    onClick={async () => { await stopScanner(); setScanState("idle"); }}
                 >
                   Cancel
                 </Button>
               </div>
           )}
 
-          {/* LOCATING */}
-          {scanState === "locating" && (
+          {/* PROCESSING */}
+          {scanState === "processing" && (
               <div className="text-center">
                 <div className="w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center mb-6 mx-auto">
                   <Loader2 className="h-12 w-12 text-primary animate-spin" />
                 </div>
-                <h2 className="text-foreground font-semibold text-xl mb-2">Verifying Location...</h2>
-                <p className="text-muted-foreground text-sm">
-                  <MapPin className="h-3 w-3 inline mr-1" />
-                  Acquiring GPS location...
-                </p>
-              </div>
-          )}
-
-          {/* SUCCESS */}
-          {scanState === "success" && result && (
-              <div className="text-center">
-                <div className="w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center mb-6 mx-auto">
-                  <CheckCircle className="h-12 w-12 text-primary" />
-                </div>
-                <h2 className="text-foreground font-semibold text-xl mb-2">Attendance Marked!</h2>
-                <p className="text-muted-foreground text-sm mb-2">
-                  {result.sessionId} • Room 301
-                </p>
-                <div className="flex items-center justify-center gap-2 mb-6">
-                  <Shield className="h-4 w-4 text-primary" />
-                  <span className="text-primary text-sm font-medium">
-                Confidence Score: {result.confidence}
-              </span>
-                </div>
-                <div className="bg-card rounded-lg border border-border p-4 text-left max-w-xs mx-auto mb-6">
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Status</span>
-                      <span className="text-primary font-medium">Present</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Time</span>
-                      <span className="text-foreground">{result.time}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Distance</span>
-                      <span className="text-primary">{Math.round(result.distance)}m away</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">GPS Verified</span>
-                      <span className="text-primary">✓ Within range</span>
-                    </div>
-                  </div>
-                </div>
-                <Button
-                    variant="outline"
-                    onClick={() => navigate("/student")}
-                    className="border-border text-foreground"
-                >
-                  Back to Dashboard
-                </Button>
-              </div>
-          )}
-
-          {/* PROXY ALERT */}
-          {scanState === "proxy_alert" && result && (
-              <div className="text-center">
-                <div className="w-24 h-24 rounded-full bg-destructive/10 flex items-center justify-center mb-6 mx-auto">
-                  <XCircle className="h-12 w-12 text-destructive" />
-                </div>
-                <h2 className="text-destructive font-semibold text-xl mb-2">Proxy Attempt Detected</h2>
-                <p className="text-muted-foreground text-sm mb-2">
-                  Your location doesn't match the classroom
-                </p>
-                <div className="flex items-center justify-center gap-2 mb-6">
-                  <Shield className="h-4 w-4 text-destructive" />
-                  <span className="text-destructive text-sm font-medium">
-                Confidence Score: {result.confidence}
-              </span>
-                </div>
-                <div className="bg-destructive/5 rounded-lg border border-destructive/20 p-4 text-left max-w-xs mx-auto mb-6">
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Status</span>
-                      <span className="text-destructive font-medium">Proxy Alert</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">GPS Check</span>
-                      <span className="text-destructive">✗ Outside geofence</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Distance</span>
-                      <span className="text-destructive">{Math.round(result.distance)}m away</span>
-                    </div>
-                  </div>
-                </div>
-                <Button
-                    variant="outline"
-                    onClick={() => setScanState("idle")}
-                    className="border-border text-foreground"
-                >
-                  Try Again
-                </Button>
+                <h2 className="text-foreground font-semibold text-xl mb-2">QR Verified</h2>
+                <p className="text-muted-foreground text-sm">Loading PIN entry…</p>
               </div>
           )}
 
@@ -342,13 +184,9 @@ const StudentScan = () => {
                 </div>
                 <h2 className="text-warning font-semibold text-xl mb-2">QR Code Expired</h2>
                 <p className="text-muted-foreground text-sm mb-6">
-                  This QR code has expired. Please ask your teacher to refresh it.
+                  Ask your teacher to refresh the QR code.
                 </p>
-                <Button
-                    variant="outline"
-                    onClick={() => setScanState("idle")}
-                    className="border-border text-foreground"
-                >
+                <Button variant="outline" onClick={() => setScanState("idle")} className="border-border text-foreground">
                   Try Again
                 </Button>
               </div>
@@ -362,11 +200,7 @@ const StudentScan = () => {
                 </div>
                 <h2 className="text-destructive font-semibold text-xl mb-2">Something went wrong</h2>
                 <p className="text-muted-foreground text-sm mb-6 max-w-xs">{errorMsg}</p>
-                <Button
-                    variant="outline"
-                    onClick={() => setScanState("idle")}
-                    className="border-border text-foreground"
-                >
+                <Button variant="outline" onClick={() => setScanState("idle")} className="border-border text-foreground">
                   Try Again
                 </Button>
               </div>
