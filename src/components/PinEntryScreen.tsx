@@ -1,23 +1,19 @@
 import { useState, useRef, useEffect } from "react";
 import { Shield, XCircle, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { verifyPin } from "@/lib/Verbalpin";
 
 interface PinEntryScreenProps {
-    sessionId: string;          // from the scanned QR payload
-    onSuccess: () => void;      // called when PIN is correct
-    onCancel: () => void;       // called when student cancels
-}
-
-interface StoredPin {
-    pin: string;
     sessionId: string;
-    expiresAt: number;
+    onSuccess: () => void;
+    onCancel: () => void;
 }
 
 const PinEntryScreen = ({ sessionId, onSuccess, onCancel }: PinEntryScreenProps) => {
     const [digits, setDigits] = useState<string[]>(["", "", "", ""]);
     const [error, setError] = useState<string>("");
     const [shake, setShake] = useState(false);
+    const [loading, setLoading] = useState(false);
     const inputRefs = [
         useRef<HTMLInputElement>(null),
         useRef<HTMLInputElement>(null),
@@ -25,20 +21,43 @@ const PinEntryScreen = ({ sessionId, onSuccess, onCancel }: PinEntryScreenProps)
         useRef<HTMLInputElement>(null),
     ];
 
-    // Auto-focus first box on mount
     useEffect(() => {
         inputRefs[0].current?.focus();
     }, []);
 
+    const triggerShake = () => {
+        setShake(true);
+        setTimeout(() => setShake(false), 500);
+    };
+
+    const validatePin = async (entered: string) => {
+        setLoading(true);
+        setError("");
+
+        // Uses the same deterministic derivation as the teacher's VerbalPinDisplay.
+        // Both devices compute the same PIN from (sessionId + current time window)
+        // without needing any network call or shared localStorage.
+        const isValid = await verifyPin(sessionId, entered);
+
+        setLoading(false);
+
+        if (isValid) {
+            onSuccess();
+        } else {
+            setError("Wrong PIN. Listen carefully and try again.");
+            triggerShake();
+            setDigits(["", "", "", ""]);
+            setTimeout(() => inputRefs[0].current?.focus(), 50);
+        }
+    };
+
     const handleChange = (index: number, value: string) => {
-        // Only accept single digits
         const digit = value.replace(/\D/g, "").slice(-1);
         const next = [...digits];
         next[index] = digit;
         setDigits(next);
         setError("");
 
-        // Auto-advance to next box
         if (digit && index < 3) {
             inputRefs[index + 1].current?.focus();
         }
@@ -62,59 +81,6 @@ const PinEntryScreen = ({ sessionId, onSuccess, onCancel }: PinEntryScreenProps)
         }
     };
 
-    const triggerShake = () => {
-        setShake(true);
-        setTimeout(() => setShake(false), 500);
-    };
-
-    const validatePin = (entered: string) => {
-        // Read stored PIN from localStorage (written by VerbalPinDisplay on teacher device)
-        const raw = localStorage.getItem("verbal_pin");
-
-        if (!raw) {
-            setError("No active PIN found. Ask your teacher to start a session.");
-            triggerShake();
-            return;
-        }
-
-        let stored: StoredPin;
-        try {
-            stored = JSON.parse(raw);
-        } catch {
-            setError("PIN data corrupted. Please try again.");
-            triggerShake();
-            return;
-        }
-
-        // Check expiry
-        if (Date.now() > stored.expiresAt) {
-            setError("PIN has expired. Ask your teacher to announce the new code.");
-            triggerShake();
-            setDigits(["", "", "", ""]);
-            inputRefs[0].current?.focus();
-            return;
-        }
-
-        // Check session match
-        if (stored.sessionId !== sessionId) {
-            setError("PIN doesn't match this session. Ensure you're in the right class.");
-            triggerShake();
-            return;
-        }
-
-        // Check PIN match
-        if (stored.pin !== entered) {
-            setError("Wrong PIN. Listen carefully and try again.");
-            triggerShake();
-            setDigits(["", "", "", ""]);
-            inputRefs[0].current?.focus();
-            return;
-        }
-
-        // All good
-        onSuccess();
-    };
-
     const handleSubmit = () => {
         const entered = digits.join("");
         if (entered.length < 4) {
@@ -126,7 +92,6 @@ const PinEntryScreen = ({ sessionId, onSuccess, onCancel }: PinEntryScreenProps)
 
     return (
         <div className="flex flex-col items-center text-center max-w-xs mx-auto">
-            {/* Icon */}
             <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mb-5">
                 <Shield className="h-10 w-10 text-primary" />
             </div>
@@ -138,12 +103,8 @@ const PinEntryScreen = ({ sessionId, onSuccess, onCancel }: PinEntryScreenProps)
 
             {/* 4-box PIN input */}
             <div
-                className={`flex gap-3 mb-4 ${shake ? "animate-[shake_0.4s_ease-in-out]" : ""}`}
-                style={
-                    shake
-                        ? { animation: "shake 0.4s ease-in-out" }
-                        : {}
-                }
+                className="flex gap-3 mb-4"
+                style={shake ? { animation: "shake 0.4s ease-in-out" } : {}}
             >
                 {digits.map((d, i) => (
                     <input
@@ -153,18 +114,20 @@ const PinEntryScreen = ({ sessionId, onSuccess, onCancel }: PinEntryScreenProps)
                         inputMode="numeric"
                         maxLength={1}
                         value={d}
+                        disabled={loading}
                         onChange={(e) => handleChange(i, e.target.value)}
                         onKeyDown={(e) => handleKeyDown(i, e)}
                         className={`w-14 h-16 text-center text-2xl font-bold rounded-xl border-2 bg-background text-foreground outline-none transition-colors
               ${d ? "border-primary" : "border-border"}
               ${error ? "border-destructive" : ""}
               focus:border-primary focus:ring-0
+              disabled:opacity-50
             `}
                     />
                 ))}
             </div>
 
-            {/* Error message */}
+            {/* Error */}
             {error && (
                 <div className="flex items-center gap-2 text-destructive text-sm mb-4">
                     <XCircle className="h-4 w-4 flex-shrink-0" />
@@ -172,16 +135,14 @@ const PinEntryScreen = ({ sessionId, onSuccess, onCancel }: PinEntryScreenProps)
                 </div>
             )}
 
-            {/* Submit */}
             <Button
                 onClick={handleSubmit}
                 className="w-full bg-primary hover:bg-primary/90 text-primary-foreground mb-3"
-                disabled={digits.some((d) => d === "")}
+                disabled={digits.some((d) => d === "") || loading}
             >
-                Verify & Mark Present
+                {loading ? "Verifying…" : "Verify & Mark Present"}
             </Button>
 
-            {/* Cancel */}
             <button
                 onClick={onCancel}
                 className="flex items-center gap-1.5 text-muted-foreground text-sm hover:text-foreground transition-colors"
@@ -190,7 +151,6 @@ const PinEntryScreen = ({ sessionId, onSuccess, onCancel }: PinEntryScreenProps)
                 Cancel scan
             </button>
 
-            {/* Shake keyframes injected inline */}
             <style>{`
         @keyframes shake {
           0%, 100% { transform: translateX(0); }
